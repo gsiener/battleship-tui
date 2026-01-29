@@ -1,8 +1,126 @@
-import { existsSync } from "fs"
-import { mkdir, readFile, writeFile } from "fs/promises"
+import { existsSync, watch, type FSWatcher } from "fs"
+import { mkdir, readFile, writeFile, open } from "fs/promises"
 import { dirname } from "path"
 import { homedir } from "os"
 import type { Player, Tournament, Game } from "./api"
+
+// ============ Bot Event Log Types ============
+
+export type BotEvent =
+  | { event: "game_start"; gameId: string; opponentId: string; timestamp: string }
+  | { event: "shot_fired"; gameId: string; coordinate: string; timestamp: string }
+  | { event: "shot_result"; gameId: string; coordinate: string; hit: boolean; sunk: string | null; timestamp: string }
+  | { event: "opponent_shot"; gameId: string; coordinate: string; hit: boolean; timestamp: string }
+  | { event: "game_end"; gameId: string; won: boolean; turns: number; timestamp: string }
+
+const BOT_LOG_PATH = `${homedir()}/.local/share/battleship-bot/game-events.jsonl`
+
+export class LogWatcher {
+  private events: BotEvent[] = []
+  private watcher: FSWatcher | null = null
+  private filePosition = 0
+  private onUpdate: () => void
+  private currentGameId: string | null = null
+
+  constructor(onUpdate: () => void) {
+    this.onUpdate = onUpdate
+  }
+
+  async start(): Promise<void> {
+    // Initial read
+    await this.readNewLines()
+
+    // Watch for changes
+    if (existsSync(BOT_LOG_PATH)) {
+      this.watcher = watch(BOT_LOG_PATH, async () => {
+        await this.readNewLines()
+      })
+    } else {
+      // Check periodically if file appears
+      const checkInterval = setInterval(async () => {
+        if (existsSync(BOT_LOG_PATH)) {
+          clearInterval(checkInterval)
+          await this.readNewLines()
+          this.watcher = watch(BOT_LOG_PATH, async () => {
+            await this.readNewLines()
+          })
+        }
+      }, 2000)
+    }
+  }
+
+  stop(): void {
+    if (this.watcher) {
+      this.watcher.close()
+      this.watcher = null
+    }
+  }
+
+  private async readNewLines(): Promise<void> {
+    if (!existsSync(BOT_LOG_PATH)) return
+
+    try {
+      const handle = await open(BOT_LOG_PATH, "r")
+      const stats = await handle.stat()
+
+      // File was truncated/rotated - reset position
+      if (stats.size < this.filePosition) {
+        this.filePosition = 0
+        this.events = []
+      }
+
+      if (stats.size > this.filePosition) {
+        const buffer = Buffer.alloc(stats.size - this.filePosition)
+        await handle.read(buffer, 0, buffer.length, this.filePosition)
+        this.filePosition = stats.size
+
+        const lines = buffer.toString("utf-8").split("\n").filter(l => l.trim())
+        let added = false
+
+        for (const line of lines) {
+          try {
+            const event = JSON.parse(line) as BotEvent
+            this.events.push(event)
+            added = true
+
+            // Track current game
+            if (event.event === "game_start") {
+              this.currentGameId = event.gameId
+            } else if (event.event === "game_end") {
+              this.currentGameId = null
+            }
+          } catch {
+            // Skip malformed lines
+          }
+        }
+
+        // Keep only last 100 events
+        if (this.events.length > 100) {
+          this.events = this.events.slice(-100)
+        }
+
+        if (added) this.onUpdate()
+      }
+
+      await handle.close()
+    } catch {
+      // File access error - ignore
+    }
+  }
+
+  getRecentEvents(count: number): BotEvent[] {
+    return this.events.slice(-count)
+  }
+
+  getCurrentGameEvents(): BotEvent[] {
+    if (!this.currentGameId) return []
+    return this.events.filter(e => e.gameId === this.currentGameId)
+  }
+
+  isGameActive(): boolean {
+    return this.currentGameId !== null
+  }
+}
 
 // ============ Config ============
 

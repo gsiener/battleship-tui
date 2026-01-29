@@ -1,6 +1,6 @@
 import { createCliRenderer, TextRenderable, BoxRenderable, type CliRenderer } from "@opentui/core"
 import { ApiClient } from "./api"
-import { Store, Config, type LeaderboardEntry } from "./state"
+import { Store, Config, LogWatcher, type LeaderboardEntry, type BotEvent } from "./state"
 import type { Tournament, Game } from "./api"
 
 // ============ UI Rendering Functions ============
@@ -97,9 +97,46 @@ function renderLiveGames(liveGames: Game[], recentGames: Game[], store: Store, m
   return lines.join("\n")
 }
 
-function renderHeader(pollInterval: number, isError: boolean): string {
+function renderBotEvents(events: BotEvent[], maxLines: number): string {
+  const lines = ["🤖 BOT ACTIVITY", "─".repeat(34)]
+
+  if (events.length === 0) {
+    lines.push("  Waiting for bot logs...")
+    lines.push("  ~/.local/share/battleship-bot/")
+    return lines.join("\n")
+  }
+
+  // Show recent events, newest first
+  const recent = events.slice(-maxLines).reverse()
+  for (const e of recent) {
+    const time = new Date(e.timestamp).toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" })
+    switch (e.event) {
+      case "game_start":
+        lines.push(`  ${time} 🎮 Game started`)
+        break
+      case "shot_fired":
+        lines.push(`  ${time} 🎯 Shot ${e.coordinate}`)
+        break
+      case "shot_result":
+        const result = e.hit ? (e.sunk ? `💥 HIT! Sunk ${e.sunk}` : "💥 HIT!") : "💨 miss"
+        lines.push(`  ${time}    → ${result}`)
+        break
+      case "opponent_shot":
+        lines.push(`  ${time} 👊 Opp ${e.coordinate} ${e.hit ? "💥" : "💨"}`)
+        break
+      case "game_end":
+        lines.push(`  ${time} ${e.won ? "🏆 WON" : "💀 LOST"} in ${e.turns} turns`)
+        break
+    }
+  }
+
+  return lines.join("\n")
+}
+
+function renderHeader(pollInterval: number, isError: boolean, botActive: boolean): string {
   const err = isError ? "⚠️ " : ""
-  return `🚢 BATTLESHIP TOURNAMENT MONITOR                    ${err}⏱️ Auto: ${pollInterval}s  🔄`
+  const bot = botActive ? "🤖 " : ""
+  return `🚢 BATTLESHIP TOURNAMENT MONITOR                ${bot}${err}⏱️ Auto: ${pollInterval}s  🔄`
 }
 
 const FOOTER = "↑↓/jk Navigate  Tab Switch pane  x Favorite  r Refresh  +/- Interval  q Quit"
@@ -172,6 +209,7 @@ class App {
   private store: Store
   private config: Config
   private poller!: Poller
+  private logWatcher!: LogWatcher
   private activePane: Pane = "tournaments"
   private leaderboardIdx = 0
   private tournamentIdx = 0
@@ -186,6 +224,8 @@ class App {
   private tournamentsText!: TextRenderable
   private liveGamesBox!: BoxRenderable
   private liveGamesText!: TextRenderable
+  private botActivityBox!: BoxRenderable
+  private botActivityText!: TextRenderable
   private footerText!: TextRenderable
 
   constructor(store: Store, config: Config) {
@@ -203,10 +243,12 @@ class App {
       () => { this.isError = false; this.render() },
       () => { this.isError = true; this.render() }
     )
+    this.logWatcher = new LogWatcher(() => this.render())
 
     await this.poller.fetchOnce()
+    await this.logWatcher.start()
     const stats = this.store.getStats()
-    console.log(`🚢 Battleship TUI v0.2.0 - Ready! (${stats.playerCount} players, ${stats.tournamentCount} tournaments, ${stats.gameCount} games)`)
+    console.log(`🚢 Battleship TUI v0.3.0 - Ready! (${stats.playerCount} players, ${stats.tournamentCount} tournaments, ${stats.gameCount} games)`)
 
     this.running = true
     this.poller.start()
@@ -237,36 +279,54 @@ class App {
     })
     this.leaderboardBox.add(this.leaderboardText)
 
-    // Tournaments (right top 60%)
-    const tWidth = width - lbWidth
-    const tHeight = Math.floor((height - 3) * 0.6)
+    // Right side layout: tournaments (45%), live games (27.5%), bot activity (27.5%)
+    const rWidth = width - lbWidth
+    const rHeight = height - 3
+    const tHeight = Math.floor(rHeight * 0.45)
+    const lgHeight = Math.floor(rHeight * 0.275)
+    const baHeight = rHeight - tHeight - lgHeight
+
+    // Tournaments (right top)
     this.tournamentsBox = new BoxRenderable(this.renderer, {
       id: "t-box", position: "absolute", left: lbWidth, top: 1,
-      width: tWidth, height: tHeight,
+      width: rWidth, height: tHeight,
       border: true, borderStyle: "single", borderColor: "#4b5563",
     })
     this.renderer.root.add(this.tournamentsBox)
 
     this.tournamentsText = new TextRenderable(this.renderer, {
       id: "t-text", position: "absolute", left: 1, top: 1,
-      width: tWidth - 4, height: tHeight - 4,
+      width: rWidth - 4, height: tHeight - 4,
     })
     this.tournamentsBox.add(this.tournamentsText)
 
-    // Live games (right bottom)
-    const lgHeight = height - 3 - tHeight
+    // Live games (right middle)
     this.liveGamesBox = new BoxRenderable(this.renderer, {
       id: "lg-box", position: "absolute", left: lbWidth, top: 1 + tHeight,
-      width: tWidth, height: lgHeight,
+      width: rWidth, height: lgHeight,
       border: true, borderStyle: "single", borderColor: "#4b5563",
     })
     this.renderer.root.add(this.liveGamesBox)
 
     this.liveGamesText = new TextRenderable(this.renderer, {
       id: "lg-text", position: "absolute", left: 1, top: 1,
-      width: tWidth - 4, height: lgHeight - 4,
+      width: rWidth - 4, height: lgHeight - 4,
     })
     this.liveGamesBox.add(this.liveGamesText)
+
+    // Bot activity (right bottom)
+    this.botActivityBox = new BoxRenderable(this.renderer, {
+      id: "ba-box", position: "absolute", left: lbWidth, top: 1 + tHeight + lgHeight,
+      width: rWidth, height: baHeight,
+      border: true, borderStyle: "single", borderColor: "#4b5563",
+    })
+    this.renderer.root.add(this.botActivityBox)
+
+    this.botActivityText = new TextRenderable(this.renderer, {
+      id: "ba-text", position: "absolute", left: 1, top: 1,
+      width: rWidth - 4, height: baHeight - 4,
+    })
+    this.botActivityBox.add(this.botActivityText)
 
     // Footer
     this.footerText = new TextRenderable(this.renderer, {
@@ -319,20 +379,25 @@ class App {
     const selectedTournament = tournaments[this.tournamentIdx]
     const liveGames = selectedTournament ? this.store.getLiveGames(selectedTournament.tournamentId) : []
     const recentGames = selectedTournament ? this.store.getRecentGames(selectedTournament.tournamentId, 5) : []
+    const botEvents = this.logWatcher.getRecentEvents(10)
+    const botActive = this.logWatcher.isGameActive()
 
-    this.headerText.content = renderHeader(this.config.get("pollInterval"), this.isError)
+    this.headerText.content = renderHeader(this.config.get("pollInterval"), this.isError, botActive)
     this.leaderboardText.content = renderLeaderboard(leaderboard, this.config, this.activePane === "leaderboard" ? this.leaderboardIdx : -1, this.config.get("leaderboardSize"))
     this.tournamentsText.content = renderTournaments(tournaments, this.activePane === "tournaments" ? this.tournamentIdx : -1, 10)
-    this.liveGamesText.content = renderLiveGames(liveGames, recentGames, this.store, 5)
+    this.liveGamesText.content = renderLiveGames(liveGames, recentGames, this.store, 4)
+    this.botActivityText.content = renderBotEvents(botEvents, 6)
     this.footerText.content = FOOTER
 
     this.leaderboardBox.borderColor = this.activePane === "leaderboard" ? "#06b6d4" : "#4b5563"
     this.tournamentsBox.borderColor = this.activePane === "tournaments" ? "#06b6d4" : "#4b5563"
+    this.botActivityBox.borderColor = botActive ? "#22c55e" : "#4b5563"
   }
 
   private async quit(): Promise<void> {
     this.running = false
     this.poller.stop()
+    this.logWatcher.stop()
     await this.renderer.stop()
     process.exit(0)
   }
