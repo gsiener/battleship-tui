@@ -221,11 +221,20 @@ export class Store {
   }
 
   // Cached and sorted: IN_PROGRESS first, then by date
+  // Filters out IN_PROGRESS tournaments with no live games
   getTournamentsSorted(): Tournament[] {
     if (this._tournamentCache) return this._tournamentCache
 
     const stateOrder = { IN_PROGRESS: 0, CREATED: 1, FINISHED: 2 } as const
-    const sorted = this.tournaments.slice().sort((a, b) => {
+    const filtered = this.tournaments.filter(t => {
+      // Hide IN_PROGRESS tournaments with no live (incomplete) games
+      if (t.state === "IN_PROGRESS") {
+        return t.games.some(g => !g.isComplete)
+      }
+      return true
+    })
+
+    const sorted = filtered.sort((a, b) => {
       const stateCompare = stateOrder[a.state] - stateOrder[b.state]
       if (stateCompare !== 0) return stateCompare
       return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
