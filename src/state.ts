@@ -249,6 +249,15 @@ export class Store {
     return t ? t.games.filter(g => !g.isComplete) : []
   }
 
+  // Get most recent completed games for a tournament
+  getRecentGames(tournamentId: string, limit: number): Game[] {
+    const t = this.tournaments.find(t => t.tournamentId === tournamentId)
+    if (!t) return []
+    // Games are typically in order, take last N completed
+    const completed = t.games.filter(g => g.isComplete && g.winnerPlayerId)
+    return completed.slice(-limit).reverse()
+  }
+
   getStats() {
     let gameCount = 0
     for (const t of this.tournaments) gameCount += t.games.length

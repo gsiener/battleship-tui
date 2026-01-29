@@ -58,37 +58,40 @@ function renderTournaments(tournaments: Tournament[], selectedIndex: number, max
   return lines.join("\n")
 }
 
-function renderLiveGames(games: Game[], store: Store, maxEntries: number): string {
-  const lines = ["⚔️  LIVE GAMES", "─".repeat(34)]
+function renderLiveGames(liveGames: Game[], recentGames: Game[], store: Store, maxEntries: number): string {
+  const lines: string[] = []
 
   // Filter to only show games that have actually started (at least one shot fired)
-  const activeGames = games.filter(g => g.playerAHits > 0 || g.playerBHits > 0)
-  const queuedCount = games.length - activeGames.length
+  const activeGames = liveGames.filter(g => g.playerAHits > 0 || g.playerBHits > 0)
+  const queuedCount = liveGames.length - activeGames.length
 
-  if (activeGames.length === 0) {
-    if (queuedCount > 0) {
-      lines.push(`  ⏳ ${queuedCount} game${queuedCount > 1 ? "s" : ""} queued`)
-    } else {
-      lines.push("  No active games")
+  if (activeGames.length > 0) {
+    lines.push("⚔️  LIVE GAMES", "─".repeat(34))
+    for (let i = 0; i < Math.min(activeGames.length, maxEntries); i++) {
+      const g = activeGames[i]!
+      const playerA = store.getPlayerName(g.playerAId).slice(0, 10)
+      const playerB = store.getPlayerName(g.playerBId).slice(0, 10)
+      const totalHits = g.playerAHits + g.playerBHits
+      lines.push(`  ${playerA} vs ${playerB}`)
+      lines.push(`     💥 ${g.playerAHits}-${g.playerBHits}  Turn ~${totalHits * 2}`)
     }
-    return lines.join("\n")
-  }
-
-  for (let i = 0; i < Math.min(activeGames.length, maxEntries); i++) {
-    const g = activeGames[i]!
-    const playerA = store.getPlayerName(g.playerAId).slice(0, 12)
-    const playerB = store.getPlayerName(g.playerBId).slice(0, 12)
-    const totalHits = g.playerAHits + g.playerBHits
-    // Progress bar based on hits toward 17 (all ships sunk)
-    const progressA = Math.min(10, Math.round((g.playerAHits / 17) * 10))
-    const progressB = Math.min(10, Math.round((g.playerBHits / 17) * 10))
-
-    lines.push(`  ${playerA} vs ${playerB}`)
-    lines.push(`     💥 ${g.playerAHits}-${g.playerBHits}  Turn ~${totalHits * 2}`)
-  }
-
-  if (queuedCount > 0) {
-    lines.push(`  ⏳ +${queuedCount} queued`)
+    if (queuedCount > 0) lines.push(`  ⏳ +${queuedCount} queued`)
+  } else {
+    // No active games - show recent results instead
+    lines.push("🏁 RECENT GAMES", "─".repeat(34))
+    if (recentGames.length === 0 && queuedCount === 0) {
+      lines.push("  No games yet")
+    } else {
+      for (const g of recentGames.slice(0, maxEntries)) {
+        const playerA = store.getPlayerName(g.playerAId).slice(0, 10)
+        const playerB = store.getPlayerName(g.playerBId).slice(0, 10)
+        const winnerName = store.getPlayerName(g.winnerPlayerId!)
+        const winner = winnerName === playerA ? "A" : "B"
+        lines.push(`  ${playerA} vs ${playerB}`)
+        lines.push(`     🏆 ${winner} wins (${g.playerAHits}-${g.playerBHits})`)
+      }
+      if (queuedCount > 0) lines.push(`  ⏳ ${queuedCount} queued (bots offline?)`)
+    }
   }
 
   return lines.join("\n")
@@ -315,11 +318,12 @@ class App {
     const tournaments = this.store.getTournamentsSorted()
     const selectedTournament = tournaments[this.tournamentIdx]
     const liveGames = selectedTournament ? this.store.getLiveGames(selectedTournament.tournamentId) : []
+    const recentGames = selectedTournament ? this.store.getRecentGames(selectedTournament.tournamentId, 5) : []
 
     this.headerText.content = renderHeader(this.config.get("pollInterval"), this.isError)
     this.leaderboardText.content = renderLeaderboard(leaderboard, this.config, this.activePane === "leaderboard" ? this.leaderboardIdx : -1, this.config.get("leaderboardSize"))
     this.tournamentsText.content = renderTournaments(tournaments, this.activePane === "tournaments" ? this.tournamentIdx : -1, 10)
-    this.liveGamesText.content = renderLiveGames(liveGames, this.store, 5)
+    this.liveGamesText.content = renderLiveGames(liveGames, recentGames, this.store, 5)
     this.footerText.content = FOOTER
 
     this.leaderboardBox.borderColor = this.activePane === "leaderboard" ? "#06b6d4" : "#4b5563"
