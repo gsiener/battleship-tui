@@ -61,20 +61,34 @@ function renderTournaments(tournaments: Tournament[], selectedIndex: number, max
 function renderLiveGames(games: Game[], store: Store, maxEntries: number): string {
   const lines = ["⚔️  LIVE GAMES", "─".repeat(34)]
 
-  if (games.length === 0) {
-    lines.push("  No active games")
+  // Filter to only show games that have actually started (at least one shot fired)
+  const activeGames = games.filter(g => g.playerAHits > 0 || g.playerBHits > 0)
+  const queuedCount = games.length - activeGames.length
+
+  if (activeGames.length === 0) {
+    if (queuedCount > 0) {
+      lines.push(`  ⏳ ${queuedCount} game${queuedCount > 1 ? "s" : ""} queued`)
+    } else {
+      lines.push("  No active games")
+    }
     return lines.join("\n")
   }
 
-  for (let i = 0; i < Math.min(games.length, maxEntries); i++) {
-    const g = games[i]!
+  for (let i = 0; i < Math.min(activeGames.length, maxEntries); i++) {
+    const g = activeGames[i]!
     const playerA = store.getPlayerName(g.playerAId).slice(0, 12)
     const playerB = store.getPlayerName(g.playerBId).slice(0, 12)
-    const progress = Math.min(10, Math.round((g.playerAHits / 17) * 10))
-    const bar = "▓".repeat(progress) + "░".repeat(10 - progress)
+    const totalHits = g.playerAHits + g.playerBHits
+    // Progress bar based on hits toward 17 (all ships sunk)
+    const progressA = Math.min(10, Math.round((g.playerAHits / 17) * 10))
+    const progressB = Math.min(10, Math.round((g.playerBHits / 17) * 10))
 
     lines.push(`  ${playerA} vs ${playerB}`)
-    lines.push(`     💥 ${g.playerAHits} - ${g.playerBHits}  ${bar}`)
+    lines.push(`     💥 ${g.playerAHits}-${g.playerBHits}  Turn ~${totalHits * 2}`)
+  }
+
+  if (queuedCount > 0) {
+    lines.push(`  ⏳ +${queuedCount} queued`)
   }
 
   return lines.join("\n")
