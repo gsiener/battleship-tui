@@ -93,7 +93,7 @@ Location: `~/.config/battleship-tui/config.json`
 |-----|--------|
 | ↑/↓ or j/k | Navigate lists |
 | Tab | Switch between panes |
-| f | Toggle favorite on selected player |
+| x | Toggle favorite on selected player |
 | r | Force refresh |
 | +/- | Adjust poll interval (5-60 seconds) |
 | q | Quit |

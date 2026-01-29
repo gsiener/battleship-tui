@@ -85,7 +85,7 @@ function renderHeader(pollInterval: number, isError: boolean): string {
   return `🚢 BATTLESHIP TOURNAMENT MONITOR                    ${err}⏱️ Auto: ${pollInterval}s  🔄`
 }
 
-const FOOTER = "↑↓ Navigate  ⇥ Switch pane  ★ Toggle fav  r Refresh  +/- Interval  q Quit"
+const FOOTER = "↑↓/jk Navigate  Tab Switch pane  x Favorite  r Refresh  +/- Interval  q Quit"
 
 // ============ Polling Service ============
 
@@ -260,12 +260,13 @@ class App {
 
   private setupInput(): void {
     this.renderer.keyInput.on("keypress", async (event) => {
-      switch (event.name) {
+      const key = event.name.toLowerCase()
+      switch (key) {
         case "q": await this.quit(); break
-        case "Tab": this.activePane = this.activePane === "leaderboard" ? "tournaments" : "leaderboard"; break
-        case "Up": case "k": this.moveSelection(-1); break
-        case "Down": case "j": this.moveSelection(1); break
-        case "f": await this.toggleFavorite(); break
+        case "tab": this.activePane = this.activePane === "leaderboard" ? "tournaments" : "leaderboard"; break
+        case "up": case "k": this.moveSelection(-1); break
+        case "down": case "j": this.moveSelection(1); break
+        case "x": await this.toggleFavorite(); break
         case "r": await this.poller.fetchOnce(); break
         case "+": case "=": this.config.adjustPollInterval(5); await this.config.save(); break
         case "-": this.config.adjustPollInterval(-5); await this.config.save(); break
