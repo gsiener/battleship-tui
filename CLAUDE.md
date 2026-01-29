@@ -14,22 +14,16 @@ bun run typecheck  # Type check
 
 ```
 src/
-├── api/              # Battleship API client
-│   ├── types.ts      # Player, Game, Tournament interfaces
-│   └── client.ts     # BattleshipClient class
-├── elo/              # ELO rating system
-│   └── calculator.ts # EloCalculator class (K=32, initial 1500)
-├── config/           # User configuration
-│   └── config.ts     # Config class (~/.config/battleship-tui/config.json)
-├── state/            # Application state
-│   └── store.ts      # Store class with leaderboard computation
-├── polling/          # Auto-refresh
-│   └── service.ts    # PollingService with exponential backoff
-├── ui/               # Terminal UI (opentui)
-│   ├── app.ts        # Main App class
-│   └── components/   # UI rendering functions
-└── index.ts          # Entry point
+├── main.ts    # Entry point, App class, Poller, UI rendering
+├── api.ts     # Types (Player, Game, Tournament) + ApiClient with smart caching
+└── state.ts   # Config, EloCalculator (incremental), Store (cached)
 ```
+
+### Performance Optimizations
+
+- **Incremental ELO**: Only processes new games, skips already-computed games
+- **Cached leaderboard/tournaments**: Invalidated on data update, not recomputed on every render
+- **Smart player polling**: Players cached for 5 min, only refetched when new IDs appear
 
 ## Key APIs
 
@@ -89,8 +83,7 @@ Location: `~/.config/battleship-tui/config.json`
 {
   "favorites": ["player-uuid-1", "player-uuid-2"],
   "pollInterval": 10,
-  "leaderboardSize": 20,
-  "theme": "default"
+  "leaderboardSize": 20
 }
 ```
 
@@ -160,14 +153,17 @@ const box = new BoxRenderable(renderer, {
 renderer.root.add(box)
 ```
 
-### Polling with Backoff
+### Key Input Handling
 
 ```typescript
-const polling = new PollingService(store, config, {
-  onUpdate: () => render(),
-  onError: (err) => showError(err),
+// Use renderer.keyInput, not renderer directly
+renderer.keyInput.on("keypress", (event) => {
+  switch (event.name) {  // event.name, not event.key
+    case "q": quit(); break
+    case "Up": moveUp(); break
+    case "Tab": switchPane(); break
+  }
 })
-polling.start()  // Uses config.pollInterval, backs off on errors
 ```
 
 ## Related Projects

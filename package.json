@@ -1,11 +1,11 @@
 {
   "name": "battleship-tui",
-  "version": "0.1.0",
-  "module": "src/index.ts",
+  "version": "0.2.0",
+  "module": "src/main.ts",
   "type": "module",
   "private": true,
   "scripts": {
-    "start": "bun run src/index.ts",
+    "start": "bun run src/main.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit"
   },
