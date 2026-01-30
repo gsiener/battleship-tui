@@ -18,6 +18,7 @@ const BOT_LOG_PATH = `${homedir()}/.local/share/battleship-bot/game-events.jsonl
 export class LogWatcher {
   private events: BotEvent[] = []
   private watcher: FSWatcher | null = null
+  private checkInterval: ReturnType<typeof setInterval> | null = null
   private filePosition = 0
   private onUpdate: () => void
   private currentGameId: string | null = null
@@ -37,9 +38,12 @@ export class LogWatcher {
       })
     } else {
       // Check periodically if file appears
-      const checkInterval = setInterval(async () => {
+      this.checkInterval = setInterval(async () => {
         if (existsSync(BOT_LOG_PATH)) {
-          clearInterval(checkInterval)
+          if (this.checkInterval) {
+            clearInterval(this.checkInterval)
+            this.checkInterval = null
+          }
           await this.readNewLines()
           this.watcher = watch(BOT_LOG_PATH, async () => {
             await this.readNewLines()
@@ -50,6 +54,10 @@ export class LogWatcher {
   }
 
   stop(): void {
+    if (this.checkInterval) {
+      clearInterval(this.checkInterval)
+      this.checkInterval = null
+    }
     if (this.watcher) {
       this.watcher.close()
       this.watcher = null
