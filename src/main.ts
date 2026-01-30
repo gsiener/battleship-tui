@@ -15,9 +15,11 @@ function renderLeaderboard(
   config: Config,
   selectedIndex: number,
   scrollOffset: number,
-  viewportHeight: number
+  viewportHeight: number,
+  filterActive: boolean
 ): string {
-  const lines = ["🏆 LEADERBOARD", "─".repeat(28)]
+  const title = filterActive ? "🏆 LEADERBOARD (filtered)" : "🏆 LEADERBOARD"
+  const lines = [title, "─".repeat(28)]
 
   const visibleCount = viewportHeight - 2
   const endIdx = Math.min(scrollOffset + visibleCount, entries.length)
@@ -123,7 +125,7 @@ function renderHeader(pollInterval: number, isError: boolean, botActive: boolean
   return `${left}${" ".repeat(padding)}${right}`
 }
 
-const FOOTER = "↑↓/jk Scroll  x Favorite  r Refresh  +/- Interval  q Quit"
+const FOOTER = "↑↓/jk Scroll  x Favorite  f Filter  r Refresh  +/- Interval  q Quit"
 
 // ============ Polling Service ============
 
@@ -196,6 +198,7 @@ class App {
   private scrollOffset = 0
   private isError = false
   private running = false
+  private filterActive = false
 
   // UI elements
   private headerText!: TextRenderable
@@ -292,6 +295,7 @@ class App {
         case "up": case "k": this.moveSelection(-1); break
         case "down": case "j": this.moveSelection(1); break
         case "x": await this.toggleFavorite(); break
+        case "f": this.toggleFilter(); break
         case "r": await this.poller.fetchOnce(); break
         case "+": case "=": this.config.adjustPollInterval(5); await this.config.save(); break
         case "-": this.config.adjustPollInterval(-5); await this.config.save(); break
@@ -301,8 +305,8 @@ class App {
   }
 
   private moveSelection(delta: number): void {
-    const entries = this.store.getLeaderboard()
-    const max = entries.length - 1
+    const entries = this.getFilteredLeaderboard()
+    const max = Math.max(0, entries.length - 1)
     this.leaderboardIdx = Math.max(0, Math.min(max, this.leaderboardIdx + delta))
 
     // Adjust scroll to keep selection visible
@@ -315,17 +319,30 @@ class App {
   }
 
   private async toggleFavorite(): Promise<void> {
-    const entry = this.store.getLeaderboard()[this.leaderboardIdx]
+    const leaderboard = this.getFilteredLeaderboard()
+    const entry = leaderboard[this.leaderboardIdx]
     if (entry) {
       this.config.toggleFavorite(entry.playerId)
       await this.config.save()
     }
   }
 
+  private toggleFilter(): void {
+    this.filterActive = !this.filterActive
+    this.leaderboardIdx = 0
+    this.scrollOffset = 0
+  }
+
+  private getFilteredLeaderboard(): LeaderboardEntry[] {
+    const all = this.store.getLeaderboard()
+    if (!this.filterActive) return all
+    return all.filter(e => e.isOnline || this.config.isFavorite(e.playerId))
+  }
+
   private render(): void {
     if (!this.running) return
 
-    const leaderboard = this.store.getLeaderboard()
+    const leaderboard = this.getFilteredLeaderboard()
     const gameBoard = this.logWatcher.getGameBoard()
     const botActive = this.logWatcher.isGameActive()
     const onlineCount = this.store.getOnlineCount()
@@ -336,7 +353,8 @@ class App {
       this.config,
       this.leaderboardIdx,
       this.scrollOffset,
-      this.lbViewportHeight
+      this.lbViewportHeight,
+      this.filterActive
     )
     this.gameBoardText.content = renderGameBoard(gameBoard, this.store)
     this.footerText.content = FOOTER
