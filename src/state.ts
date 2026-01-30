@@ -13,31 +13,40 @@ export type BotEvent =
   | { event: "opponent_shot"; gameId: string; coordinate: string; hit: boolean; timestamp: string }
   | { event: "game_end"; gameId: string; won: boolean; turns: number; timestamp: string }
 
+export type ShotResult = "miss" | "hit" | "sunk"
+
+export interface GameBoard {
+  gameId: string
+  opponentId: string
+  yourShots: Map<string, ShotResult>
+  opponentShots: Map<string, "miss" | "hit">
+  turnCount: number
+  status: "live" | "won" | "lost"
+}
+
 const BOT_LOG_PATH = `${homedir()}/.local/share/battleship-bot/game-events.jsonl`
 
 export class LogWatcher {
-  private events: BotEvent[] = []
   private watcher: FSWatcher | null = null
   private checkInterval: ReturnType<typeof setInterval> | null = null
   private filePosition = 0
   private onUpdate: () => void
-  private currentGameId: string | null = null
+  private currentGame: GameBoard | null = null
+  private lastCompletedGame: GameBoard | null = null
+  private pendingShot: string | null = null
 
   constructor(onUpdate: () => void) {
     this.onUpdate = onUpdate
   }
 
   async start(): Promise<void> {
-    // Initial read
     await this.readNewLines()
 
-    // Watch for changes
     if (existsSync(BOT_LOG_PATH)) {
       this.watcher = watch(BOT_LOG_PATH, async () => {
         await this.readNewLines()
       })
     } else {
-      // Check periodically if file appears
       this.checkInterval = setInterval(async () => {
         if (existsSync(BOT_LOG_PATH)) {
           if (this.checkInterval) {
@@ -71,10 +80,10 @@ export class LogWatcher {
       const handle = await open(BOT_LOG_PATH, "r")
       const stats = await handle.stat()
 
-      // File was truncated/rotated - reset position
       if (stats.size < this.filePosition) {
         this.filePosition = 0
-        this.events = []
+        this.currentGame = null
+        this.pendingShot = null
       }
 
       if (stats.size > this.filePosition) {
@@ -83,31 +92,18 @@ export class LogWatcher {
         this.filePosition = stats.size
 
         const lines = buffer.toString("utf-8").split("\n").filter(l => l.trim())
-        let added = false
+        let changed = false
 
         for (const line of lines) {
           try {
             const event = JSON.parse(line) as BotEvent
-            this.events.push(event)
-            added = true
-
-            // Track current game
-            if (event.event === "game_start") {
-              this.currentGameId = event.gameId
-            } else if (event.event === "game_end") {
-              this.currentGameId = null
-            }
+            if (this.processEvent(event)) changed = true
           } catch {
             // Skip malformed lines
           }
         }
 
-        // Keep only last 100 events
-        if (this.events.length > 100) {
-          this.events = this.events.slice(-100)
-        }
-
-        if (added) this.onUpdate()
+        if (changed) this.onUpdate()
       }
 
       await handle.close()
@@ -116,17 +112,65 @@ export class LogWatcher {
     }
   }
 
-  getRecentEvents(count: number): BotEvent[] {
-    return this.events.slice(-count)
+  private processEvent(event: BotEvent): boolean {
+    switch (event.event) {
+      case "game_start":
+        this.currentGame = {
+          gameId: event.gameId,
+          opponentId: event.opponentId,
+          yourShots: new Map(),
+          opponentShots: new Map(),
+          turnCount: 0,
+          status: "live",
+        }
+        this.pendingShot = null
+        return true
+
+      case "shot_fired":
+        if (this.currentGame && this.currentGame.gameId === event.gameId) {
+          this.pendingShot = event.coordinate
+          this.currentGame.turnCount++
+          return true
+        }
+        return false
+
+      case "shot_result":
+        if (this.currentGame && this.currentGame.gameId === event.gameId) {
+          const coord = event.coordinate
+          const result: ShotResult = event.sunk ? "sunk" : event.hit ? "hit" : "miss"
+          this.currentGame.yourShots.set(coord, result)
+          this.pendingShot = null
+          return true
+        }
+        return false
+
+      case "opponent_shot":
+        if (this.currentGame && this.currentGame.gameId === event.gameId) {
+          this.currentGame.opponentShots.set(event.coordinate, event.hit ? "hit" : "miss")
+          return true
+        }
+        return false
+
+      case "game_end":
+        if (this.currentGame && this.currentGame.gameId === event.gameId) {
+          this.currentGame.status = event.won ? "won" : "lost"
+          this.currentGame.turnCount = event.turns
+          this.lastCompletedGame = this.currentGame
+          this.currentGame = null
+          this.pendingShot = null
+          return true
+        }
+        return false
+    }
+    return false
   }
 
-  getCurrentGameEvents(): BotEvent[] {
-    if (!this.currentGameId) return []
-    return this.events.filter(e => e.gameId === this.currentGameId)
+  getGameBoard(): GameBoard | null {
+    return this.currentGame ?? this.lastCompletedGame
   }
 
   isGameActive(): boolean {
-    return this.currentGameId !== null
+    return this.currentGame !== null
   }
 }
 

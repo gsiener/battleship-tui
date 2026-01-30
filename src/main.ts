@@ -1,7 +1,6 @@
 import { createCliRenderer, TextRenderable, BoxRenderable, type CliRenderer } from "@opentui/core"
 import { ApiClient } from "./api"
-import { Store, Config, LogWatcher, type LeaderboardEntry, type BotEvent } from "./state"
-import type { Tournament, Game } from "./api"
+import { Store, Config, LogWatcher, type LeaderboardEntry, type GameBoard } from "./state"
 
 // ============ UI Rendering Functions ============
 
@@ -11,135 +10,115 @@ function formatRatingChange(change: number): string {
   return "━"
 }
 
-function renderLeaderboard(entries: LeaderboardEntry[], config: Config, selectedIndex: number, maxEntries: number): string {
-  const lines = ["🏆 LEADERBOARD", "─".repeat(30)]
+function renderLeaderboard(
+  entries: LeaderboardEntry[],
+  config: Config,
+  selectedIndex: number,
+  scrollOffset: number,
+  viewportHeight: number
+): string {
+  const lines = ["🏆 LEADERBOARD", "─".repeat(28)]
 
-  for (let i = 0; i < Math.min(entries.length, maxEntries); i++) {
+  const visibleCount = viewportHeight - 2
+  const endIdx = Math.min(scrollOffset + visibleCount, entries.length)
+
+  for (let i = scrollOffset; i < endIdx; i++) {
     const e = entries[i]!
     const rank = String(i + 1).padStart(2)
     const fav = config.isFavorite(e.playerId) ? "⭐" : "  "
-    const name = e.displayName.slice(0, 16).padEnd(16)
+    const name = e.displayName.slice(0, 12).padEnd(12)
     const rating = String(e.rating).padStart(4)
     const change = formatRatingChange(e.ratingChange)
     const prov = e.isProvisional ? "*" : " "
     const sel = i === selectedIndex ? ">" : " "
-    lines.push(`${sel}${rank}. ${fav} ${name} ${rating}${prov} ${change}`)
+    lines.push(`${sel}${rank}. ${fav}${name} ${rating}${prov} ${change}`)
+  }
+
+  // Scroll indicators
+  if (scrollOffset > 0) {
+    lines[2] = "  ↑ more above" + lines[2]!.slice(14)
+  }
+  if (endIdx < entries.length) {
+    lines.push(`  ↓ ${entries.length - endIdx} more`)
   }
 
   return lines.join("\n")
 }
 
-function getTournamentEmoji(state: Tournament["state"]): string {
-  return state === "IN_PROGRESS" ? "🔴" : state === "FINISHED" ? "🏁" : "⚪"
-}
-
-function renderTournaments(tournaments: Tournament[], selectedIndex: number, maxEntries: number): string {
-  const lines = ["📋 TOURNAMENTS", "─".repeat(34)]
-
-  if (tournaments.length === 0) {
-    lines.push("  🏜️ No tournaments found")
-    return lines.join("\n")
-  }
-
-  for (let i = 0; i < Math.min(tournaments.length, maxEntries); i++) {
-    const t = tournaments[i]!
-    const emoji = getTournamentEmoji(t.state)
-    const name = t.name.slice(0, 20).padEnd(20)
-    const state = t.state.padEnd(11)
-    const sel = i === selectedIndex ? ">" : " "
-    lines.push(`${sel}${emoji} ${name} ${state}`)
-
-    const roundInfo = t.state === "IN_PROGRESS" ? `📍 Round ${t.currentRound}`
-      : t.state === "CREATED" ? "⏳ Not started"
-      : `🎮 ${t.games.length} games`
-    lines.push(`    👥 ${t.playerIds.length}  ·  ${roundInfo}`)
-  }
-
-  return lines.join("\n")
-}
-
-function renderLiveGames(liveGames: Game[], recentGames: Game[], store: Store, maxEntries: number): string {
+function renderBoard(shots: Map<string, string>, title: string): string[] {
   const lines: string[] = []
+  lines.push(title)
+  lines.push("  A B C D E F G H I J")
 
-  // Filter to only show games that have actually started (at least one shot fired)
-  const activeGames = liveGames.filter(g => g.playerAHits > 0 || g.playerBHits > 0)
-  const queuedCount = liveGames.length - activeGames.length
-
-  if (activeGames.length > 0) {
-    lines.push("⚔️  LIVE GAMES", "─".repeat(34))
-    for (let i = 0; i < Math.min(activeGames.length, maxEntries); i++) {
-      const g = activeGames[i]!
-      const playerA = store.getPlayerName(g.playerAId).slice(0, 10)
-      const playerB = store.getPlayerName(g.playerBId).slice(0, 10)
-      const totalHits = g.playerAHits + g.playerBHits
-      lines.push(`  ${playerA} vs ${playerB}`)
-      lines.push(`     💥 ${g.playerAHits}-${g.playerBHits}  Turn ~${totalHits * 2}`)
+  for (let row = 1; row <= 10; row++) {
+    let line = String(row).padStart(2)
+    for (let col = 0; col < 10; col++) {
+      const coord = String.fromCharCode(65 + col) + row
+      const shot = shots.get(coord)
+      let char = "·"
+      if (shot === "miss") char = "○"
+      else if (shot === "hit") char = "✕"
+      else if (shot === "sunk") char = "█"
+      line += " " + char
     }
-    if (queuedCount > 0) lines.push(`  ⏳ +${queuedCount} queued`)
-  } else {
-    // No active games - show recent results instead
-    lines.push("🏁 RECENT GAMES", "─".repeat(34))
-    if (recentGames.length === 0 && queuedCount === 0) {
-      lines.push("  No games yet")
-    } else {
-      for (const g of recentGames.slice(0, maxEntries)) {
-        const playerA = store.getPlayerName(g.playerAId).slice(0, 10)
-        const playerB = store.getPlayerName(g.playerBId).slice(0, 10)
-        const winnerName = store.getPlayerName(g.winnerPlayerId!)
-        const winner = winnerName === playerA ? "A" : "B"
-        lines.push(`  ${playerA} vs ${playerB}`)
-        lines.push(`     🏆 ${winner} wins (${g.playerAHits}-${g.playerBHits})`)
-      }
-      if (queuedCount > 0) lines.push(`  ⏳ ${queuedCount} queued (bots offline?)`)
-    }
+    lines.push(line)
   }
 
-  return lines.join("\n")
+  return lines
 }
 
-function renderBotEvents(events: BotEvent[], maxLines: number): string {
-  const lines = ["🤖 BOT ACTIVITY", "─".repeat(34)]
+function renderGameBoard(game: GameBoard | null, store: Store): string {
+  const lines: string[] = ["⚔️  GAME BOARD", "─".repeat(50)]
 
-  if (events.length === 0) {
-    lines.push("  Waiting for bot logs...")
-    lines.push("  ~/.local/share/battleship-bot/")
+  if (!game) {
+    lines.push("")
+    lines.push("  Waiting for game...")
+    lines.push("  Start your bot to see the board here.")
+    lines.push("")
+    lines.push("  Log file: ~/.local/share/battleship-bot/")
+    lines.push("            game-events.jsonl")
     return lines.join("\n")
   }
 
-  // Show recent events, newest first
-  const recent = events.slice(-maxLines).reverse()
-  for (const e of recent) {
-    const time = new Date(e.timestamp).toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" })
-    switch (e.event) {
-      case "game_start":
-        lines.push(`  ${time} 🎮 Game started`)
-        break
-      case "shot_fired":
-        lines.push(`  ${time} 🎯 Shot ${e.coordinate}`)
-        break
-      case "shot_result":
-        const result = e.hit ? (e.sunk ? `💥 HIT! Sunk ${e.sunk}` : "💥 HIT!") : "💨 miss"
-        lines.push(`  ${time}    → ${result}`)
-        break
-      case "opponent_shot":
-        lines.push(`  ${time} 👊 Opp ${e.coordinate} ${e.hit ? "💥" : "💨"}`)
-        break
-      case "game_end":
-        lines.push(`  ${time} ${e.won ? "🏆 WON" : "💀 LOST"} in ${e.turns} turns`)
-        break
-    }
+  const opponentName = store.getPlayerName(game.opponentId)
+
+  // Render both boards side by side
+  const yourBoard = renderBoard(
+    new Map([...game.yourShots].map(([k, v]) => [k, v])),
+    "YOUR SHOTS"
+  )
+  const oppBoard = renderBoard(
+    new Map([...game.opponentShots].map(([k, v]) => [k, v])),
+    "OPPONENT SHOTS"
+  )
+
+  // Combine side by side with spacing
+  for (let i = 0; i < yourBoard.length; i++) {
+    const left = yourBoard[i]!.padEnd(24)
+    const right = oppBoard[i] ?? ""
+    lines.push(left + right)
   }
+
+  // Status line
+  lines.push("")
+  const statusEmoji = game.status === "live" ? "🔴 LIVE" :
+    game.status === "won" ? "🏆 WON" : "💀 LOST"
+  lines.push(`vs ${opponentName}  ·  Turn ${game.turnCount}  ·  ${statusEmoji}`)
+
+  // Legend
+  lines.push("")
+  lines.push("· unknown  ○ miss  ✕ hit  █ sunk")
 
   return lines.join("\n")
 }
 
 function renderHeader(pollInterval: number, isError: boolean, botActive: boolean): string {
   const err = isError ? "⚠️ " : ""
-  const bot = botActive ? "🤖 " : ""
-  return `🚢 BATTLESHIP TOURNAMENT MONITOR                ${bot}${err}⏱️ Auto: ${pollInterval}s  🔄`
+  const bot = botActive ? "🔴 LIVE " : ""
+  return `🚢 BATTLESHIP                              ${bot}${err}⏱️ ${pollInterval}s`
 }
 
-const FOOTER = "↑↓/jk Navigate  Tab Switch pane  x Favorite  r Refresh  +/- Interval  q Quit"
+const FOOTER = "↑↓/jk Scroll  x Favorite  r Refresh  +/- Interval  q Quit"
 
 // ============ Polling Service ============
 
@@ -202,17 +181,14 @@ class Poller {
 
 // ============ App ============
 
-type Pane = "leaderboard" | "tournaments"
-
 class App {
   private renderer!: CliRenderer
   private store: Store
   private config: Config
   private poller!: Poller
   private logWatcher!: LogWatcher
-  private activePane: Pane = "tournaments"
   private leaderboardIdx = 0
-  private tournamentIdx = 0
+  private scrollOffset = 0
   private isError = false
   private running = false
 
@@ -220,13 +196,12 @@ class App {
   private headerText!: TextRenderable
   private leaderboardBox!: BoxRenderable
   private leaderboardText!: TextRenderable
-  private tournamentsBox!: BoxRenderable
-  private tournamentsText!: TextRenderable
-  private liveGamesBox!: BoxRenderable
-  private liveGamesText!: TextRenderable
-  private botActivityBox!: BoxRenderable
-  private botActivityText!: TextRenderable
+  private gameBoardBox!: BoxRenderable
+  private gameBoardText!: TextRenderable
   private footerText!: TextRenderable
+
+  // Layout dimensions
+  private lbViewportHeight = 0
 
   constructor(store: Store, config: Config) {
     this.store = store
@@ -248,7 +223,7 @@ class App {
     await this.poller.fetchOnce()
     await this.logWatcher.start()
     const stats = this.store.getStats()
-    console.log(`🚢 Battleship TUI v0.3.0 - Ready! (${stats.playerCount} players, ${stats.tournamentCount} tournaments, ${stats.gameCount} games)`)
+    console.log(`🚢 Battleship TUI v0.4.0 - Ready! (${stats.playerCount} players, ${stats.tournamentCount} tournaments, ${stats.gameCount} games)`)
 
     this.running = true
     this.poller.start()
@@ -264,69 +239,38 @@ class App {
     })
     this.renderer.root.add(this.headerText)
 
-    // Leaderboard (left 40%)
-    const lbWidth = Math.floor(width * 0.4)
+    // Leaderboard (left 35%)
+    const lbWidth = Math.floor(width * 0.35)
+    const contentHeight = height - 3
+    this.lbViewportHeight = contentHeight - 4
+
     this.leaderboardBox = new BoxRenderable(this.renderer, {
       id: "lb-box", position: "absolute", left: 0, top: 1,
-      width: lbWidth, height: height - 3,
-      border: true, borderStyle: "single", borderColor: "#4b5563",
+      width: lbWidth, height: contentHeight,
+      border: true, borderStyle: "single", borderColor: "#06b6d4",
     })
     this.renderer.root.add(this.leaderboardBox)
 
     this.leaderboardText = new TextRenderable(this.renderer, {
       id: "lb-text", position: "absolute", left: 1, top: 1,
-      width: lbWidth - 4, height: height - 6,
+      width: lbWidth - 4, height: contentHeight - 4,
     })
     this.leaderboardBox.add(this.leaderboardText)
 
-    // Right side layout: tournaments (45%), live games (27.5%), bot activity (27.5%)
-    const rWidth = width - lbWidth
-    const rHeight = height - 3
-    const tHeight = Math.floor(rHeight * 0.45)
-    const lgHeight = Math.floor(rHeight * 0.275)
-    const baHeight = rHeight - tHeight - lgHeight
-
-    // Tournaments (right top)
-    this.tournamentsBox = new BoxRenderable(this.renderer, {
-      id: "t-box", position: "absolute", left: lbWidth, top: 1,
-      width: rWidth, height: tHeight,
+    // Game board (right 65%)
+    const gbWidth = width - lbWidth
+    this.gameBoardBox = new BoxRenderable(this.renderer, {
+      id: "gb-box", position: "absolute", left: lbWidth, top: 1,
+      width: gbWidth, height: contentHeight,
       border: true, borderStyle: "single", borderColor: "#4b5563",
     })
-    this.renderer.root.add(this.tournamentsBox)
+    this.renderer.root.add(this.gameBoardBox)
 
-    this.tournamentsText = new TextRenderable(this.renderer, {
-      id: "t-text", position: "absolute", left: 1, top: 1,
-      width: rWidth - 4, height: tHeight - 4,
+    this.gameBoardText = new TextRenderable(this.renderer, {
+      id: "gb-text", position: "absolute", left: 1, top: 1,
+      width: gbWidth - 4, height: contentHeight - 4,
     })
-    this.tournamentsBox.add(this.tournamentsText)
-
-    // Live games (right middle)
-    this.liveGamesBox = new BoxRenderable(this.renderer, {
-      id: "lg-box", position: "absolute", left: lbWidth, top: 1 + tHeight,
-      width: rWidth, height: lgHeight,
-      border: true, borderStyle: "single", borderColor: "#4b5563",
-    })
-    this.renderer.root.add(this.liveGamesBox)
-
-    this.liveGamesText = new TextRenderable(this.renderer, {
-      id: "lg-text", position: "absolute", left: 1, top: 1,
-      width: rWidth - 4, height: lgHeight - 4,
-    })
-    this.liveGamesBox.add(this.liveGamesText)
-
-    // Bot activity (right bottom)
-    this.botActivityBox = new BoxRenderable(this.renderer, {
-      id: "ba-box", position: "absolute", left: lbWidth, top: 1 + tHeight + lgHeight,
-      width: rWidth, height: baHeight,
-      border: true, borderStyle: "single", borderColor: "#4b5563",
-    })
-    this.renderer.root.add(this.botActivityBox)
-
-    this.botActivityText = new TextRenderable(this.renderer, {
-      id: "ba-text", position: "absolute", left: 1, top: 1,
-      width: rWidth - 4, height: baHeight - 4,
-    })
-    this.botActivityBox.add(this.botActivityText)
+    this.gameBoardBox.add(this.gameBoardText)
 
     // Footer
     this.footerText = new TextRenderable(this.renderer, {
@@ -340,7 +284,6 @@ class App {
       const key = event.name.toLowerCase()
       switch (key) {
         case "q": await this.quit(); break
-        case "tab": this.activePane = this.activePane === "leaderboard" ? "tournaments" : "leaderboard"; break
         case "up": case "k": this.moveSelection(-1); break
         case "down": case "j": this.moveSelection(1); break
         case "x": await this.toggleFavorite(); break
@@ -353,17 +296,20 @@ class App {
   }
 
   private moveSelection(delta: number): void {
-    if (this.activePane === "leaderboard") {
-      const max = Math.min(this.store.getLeaderboard().length - 1, this.config.get("leaderboardSize") - 1)
-      this.leaderboardIdx = Math.max(0, Math.min(max, this.leaderboardIdx + delta))
-    } else {
-      const max = this.store.getTournamentsSorted().length - 1
-      this.tournamentIdx = Math.max(0, Math.min(max, this.tournamentIdx + delta))
+    const entries = this.store.getLeaderboard()
+    const max = entries.length - 1
+    this.leaderboardIdx = Math.max(0, Math.min(max, this.leaderboardIdx + delta))
+
+    // Adjust scroll to keep selection visible
+    const visibleCount = this.lbViewportHeight - 2
+    if (this.leaderboardIdx < this.scrollOffset) {
+      this.scrollOffset = this.leaderboardIdx
+    } else if (this.leaderboardIdx >= this.scrollOffset + visibleCount) {
+      this.scrollOffset = this.leaderboardIdx - visibleCount + 1
     }
   }
 
   private async toggleFavorite(): Promise<void> {
-    if (this.activePane !== "leaderboard") return
     const entry = this.store.getLeaderboard()[this.leaderboardIdx]
     if (entry) {
       this.config.toggleFavorite(entry.playerId)
@@ -375,23 +321,22 @@ class App {
     if (!this.running) return
 
     const leaderboard = this.store.getLeaderboard()
-    const tournaments = this.store.getTournamentsSorted()
-    const selectedTournament = tournaments[this.tournamentIdx]
-    const liveGames = selectedTournament ? this.store.getLiveGames(selectedTournament.tournamentId) : []
-    const recentGames = selectedTournament ? this.store.getRecentGames(selectedTournament.tournamentId, 5) : []
-    const botEvents = this.logWatcher.getRecentEvents(10)
+    const gameBoard = this.logWatcher.getGameBoard()
     const botActive = this.logWatcher.isGameActive()
 
     this.headerText.content = renderHeader(this.config.get("pollInterval"), this.isError, botActive)
-    this.leaderboardText.content = renderLeaderboard(leaderboard, this.config, this.activePane === "leaderboard" ? this.leaderboardIdx : -1, this.config.get("leaderboardSize"))
-    this.tournamentsText.content = renderTournaments(tournaments, this.activePane === "tournaments" ? this.tournamentIdx : -1, 10)
-    this.liveGamesText.content = renderLiveGames(liveGames, recentGames, this.store, 4)
-    this.botActivityText.content = renderBotEvents(botEvents, 6)
+    this.leaderboardText.content = renderLeaderboard(
+      leaderboard,
+      this.config,
+      this.leaderboardIdx,
+      this.scrollOffset,
+      this.lbViewportHeight
+    )
+    this.gameBoardText.content = renderGameBoard(gameBoard, this.store)
     this.footerText.content = FOOTER
 
-    this.leaderboardBox.borderColor = this.activePane === "leaderboard" ? "#06b6d4" : "#4b5563"
-    this.tournamentsBox.borderColor = this.activePane === "tournaments" ? "#06b6d4" : "#4b5563"
-    this.botActivityBox.borderColor = botActive ? "#22c55e" : "#4b5563"
+    // Highlight game board when active
+    this.gameBoardBox.borderColor = botActive ? "#22c55e" : "#4b5563"
   }
 
   private async quit(): Promise<void> {
