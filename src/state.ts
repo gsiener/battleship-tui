@@ -338,6 +338,7 @@ export interface LeaderboardEntry {
   ratingChange: number
   gameCount: number
   isProvisional: boolean
+  isOnline: boolean
 }
 
 export class Store {
@@ -375,6 +376,7 @@ export class Store {
 
     const entries: LeaderboardEntry[] = []
     for (const playerId of this.elo.getAllPlayerIds()) {
+      const player = this.players.get(playerId)
       entries.push({
         playerId,
         displayName: this.getPlayerName(playerId),
@@ -382,12 +384,21 @@ export class Store {
         ratingChange: this.elo.getRatingChange(playerId),
         gameCount: this.elo.getGameCount(playerId),
         isProvisional: this.elo.isProvisional(playerId),
+        isOnline: player?.isConnected ?? false,
       })
     }
 
     entries.sort((a, b) => b.rating - a.rating)
     this._leaderboardCache = entries
     return entries
+  }
+
+  getOnlineCount(): number {
+    let count = 0
+    for (const player of this.players.values()) {
+      if (player.isConnected) count++
+    }
+    return count
   }
 
   // Cached and sorted: IN_PROGRESS first, then by date

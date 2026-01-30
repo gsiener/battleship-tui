@@ -25,13 +25,14 @@ function renderLeaderboard(
   for (let i = scrollOffset; i < endIdx; i++) {
     const e = entries[i]!
     const rank = String(i + 1).padStart(2)
-    const fav = config.isFavorite(e.playerId) ? "⭐" : "  "
-    const name = e.displayName.slice(0, 12).padEnd(12)
+    const online = e.isOnline ? "🟢" : "  "
+    const fav = config.isFavorite(e.playerId) ? "⭐" : " "
+    const name = e.displayName.slice(0, 11).padEnd(11)
     const rating = String(e.rating).padStart(4)
     const change = formatRatingChange(e.ratingChange)
     const prov = e.isProvisional ? "*" : " "
     const sel = i === selectedIndex ? ">" : " "
-    lines.push(`${sel}${rank}. ${fav}${name} ${rating}${prov} ${change}`)
+    lines.push(`${sel}${rank}.${online}${fav}${name} ${rating}${prov} ${change}`)
   }
 
   // Scroll indicators
@@ -112,10 +113,14 @@ function renderGameBoard(game: GameBoard | null, store: Store): string {
   return lines.join("\n")
 }
 
-function renderHeader(pollInterval: number, isError: boolean, botActive: boolean): string {
-  const err = isError ? "⚠️ " : ""
-  const bot = botActive ? "🔴 LIVE " : ""
-  return `🚢 BATTLESHIP                              ${bot}${err}⏱️ ${pollInterval}s`
+function renderHeader(pollInterval: number, isError: boolean, botActive: boolean, onlineCount: number, width: number): string {
+  const left = "🚢 BATTLESHIP"
+  const online = onlineCount > 0 ? `🟢 ${onlineCount} online` : ""
+  const bot = botActive ? "🔴 LIVE" : ""
+  const err = isError ? "⚠️" : ""
+  const right = `${online}  ${bot}  ${err}  ⏱️ ${pollInterval}s`.replace(/\s+/g, " ").trim()
+  const padding = Math.max(0, width - left.length - right.length - 2)
+  return `${left}${" ".repeat(padding)}${right}`
 }
 
 const FOOTER = "↑↓/jk Scroll  x Favorite  r Refresh  +/- Interval  q Quit"
@@ -323,8 +328,9 @@ class App {
     const leaderboard = this.store.getLeaderboard()
     const gameBoard = this.logWatcher.getGameBoard()
     const botActive = this.logWatcher.isGameActive()
+    const onlineCount = this.store.getOnlineCount()
 
-    this.headerText.content = renderHeader(this.config.get("pollInterval"), this.isError, botActive)
+    this.headerText.content = renderHeader(this.config.get("pollInterval"), this.isError, botActive, onlineCount, this.renderer.width)
     this.leaderboardText.content = renderLeaderboard(
       leaderboard,
       this.config,
