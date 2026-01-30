@@ -359,10 +359,10 @@ export class Store {
     this.tournaments = tournaments
 
     // Process ELO (incremental - only new games)
-    const changed = this.elo.processNewGames(tournaments)
+    this.elo.processNewGames(tournaments)
 
-    // Invalidate caches
-    if (changed) this._leaderboardCache = null
+    // Always invalidate caches - online status may have changed
+    this._leaderboardCache = null
     this._tournamentCache = null
   }
 
