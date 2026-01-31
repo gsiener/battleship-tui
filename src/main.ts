@@ -367,7 +367,21 @@ class App {
     this.running = false
     this.poller.stop()
     this.logWatcher.stop()
+
+    // Clear all UI elements before stopping renderer
+    this.renderer.root.children.forEach(child => this.renderer.root.remove(child))
+
+    // Stop renderer and give it time to restore terminal
     await this.renderer.stop()
+
+    // Small delay to ensure terminal state is fully restored
+    await new Promise(resolve => setTimeout(resolve, 50))
+
+    // Explicitly restore terminal state
+    process.stdout.write("\x1b[?25h") // Show cursor
+    process.stdout.write("\x1b[0m")   // Reset colors/styles
+    process.stdout.write("\x1bc")     // Reset terminal
+
     process.exit(0)
   }
 }
