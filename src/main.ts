@@ -199,6 +199,7 @@ class App {
   private isError = false
   private running = false
   private filterActive = false
+  private keypressHandler: ((event: { name: string }) => void) | null = null
 
   // UI elements
   private headerText!: TextRenderable
@@ -288,7 +289,8 @@ class App {
   }
 
   private setupInput(): void {
-    this.renderer.keyInput.on("keypress", async (event) => {
+    this.keypressHandler = async (event: { name: string }) => {
+      if (!this.running) return
       const key = event.name.toLowerCase()
       switch (key) {
         case "q": await this.quit(); break
@@ -301,7 +303,8 @@ class App {
         case "-": this.config.adjustPollInterval(-5); await this.config.save(); break
       }
       this.render()
-    })
+    }
+    this.renderer.keyInput.on("keypress", this.keypressHandler)
   }
 
   private moveSelection(delta: number): void {
@@ -364,23 +367,45 @@ class App {
   }
 
   private async quit(): Promise<void> {
+    if (!this.running) return // Prevent double quit
     this.running = false
+
+    // Remove keypress handler first to prevent events during shutdown
+    if (this.keypressHandler) {
+      this.renderer.keyInput.off("keypress", this.keypressHandler)
+      this.keypressHandler = null
+    }
+
     this.poller.stop()
     this.logWatcher.stop()
 
-    // Clear all UI elements before stopping renderer
-    this.renderer.root.children.forEach(child => this.renderer.root.remove(child))
+    // Forcefully restore terminal state BEFORE destroy
+    // This ensures cleanup happens even if destroy() fails
+    const cleanup = [
+      "\x1b[?1003l", // Disable all mouse tracking
+      "\x1b[?1002l", // Disable cell motion mouse tracking
+      "\x1b[?1000l", // Disable mouse click tracking
+      "\x1b[?1006l", // Disable SGR mouse mode
+      "\x1b[?1004l", // Disable focus reporting
+      "\x1b[?2004l", // Disable bracketed paste
+      "\x1b[?1049l", // Exit alternate screen buffer
+      "\x1b[?25h",   // Show cursor
+      "\x1b[0m",     // Reset colors/styles
+    ].join("")
+    process.stdout.write(cleanup)
 
-    // Stop renderer and give it time to restore terminal
-    await this.renderer.stop()
+    // Restore stdin to cooked mode
+    if (process.stdin.isTTY && process.stdin.setRawMode) {
+      process.stdin.setRawMode(false)
+    }
+    process.stdin.pause()
 
-    // Small delay to ensure terminal state is fully restored
-    await new Promise(resolve => setTimeout(resolve, 50))
-
-    // Explicitly restore terminal state
-    process.stdout.write("\x1b[?25h") // Show cursor
-    process.stdout.write("\x1b[0m")   // Reset colors/styles
-    process.stdout.write("\x1bc")     // Reset terminal
+    // Now call destroy
+    try {
+      this.renderer.destroy()
+    } catch {
+      // Ignore errors
+    }
 
     process.exit(0)
   }
