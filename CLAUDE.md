@@ -166,6 +166,41 @@ renderer.keyInput.on("keypress", (event) => {
 })
 ```
 
+### Terminal Cleanup on Exit
+
+opentui's `destroy()` method doesn't reliably restore terminal state. Manually clean up:
+
+```typescript
+async function quit() {
+  // Remove event listeners first
+  renderer.keyInput.off("keypress", handler)
+
+  // Manually restore terminal state
+  const cleanup = [
+    "\x1b[?1003l", // Disable all mouse tracking
+    "\x1b[?1002l", // Disable cell motion mouse tracking
+    "\x1b[?1000l", // Disable mouse click tracking
+    "\x1b[?1006l", // Disable SGR mouse mode
+    "\x1b[?1004l", // Disable focus reporting
+    "\x1b[?2004l", // Disable bracketed paste
+    "\x1b[?1049l", // Exit alternate screen buffer
+    "\x1b[?25h",   // Show cursor
+    "\x1b[0m",     // Reset colors/styles
+  ].join("")
+  process.stdout.write(cleanup)
+
+  // Restore stdin to cooked mode
+  if (process.stdin.isTTY && process.stdin.setRawMode) {
+    process.stdin.setRawMode(false)
+  }
+  process.stdin.pause()
+
+  // Then call destroy
+  renderer.destroy()
+  process.exit(0)
+}
+```
+
 ## Related Projects
 
 - **DepthCharge bot** - User's battleship bot (see ../bsbot)
