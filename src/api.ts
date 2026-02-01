@@ -77,9 +77,19 @@ export class ApiClient {
   private findNewPlayerIds(tournaments: Tournament[]): string[] {
     const newIds: string[] = []
     for (const t of tournaments) {
+      // Check tournament player IDs
       for (const id of t.playerIds) {
         if (!this.knownPlayerIds.has(id)) {
           newIds.push(id)
+        }
+      }
+      // Also check player IDs from games (in case players left tournament)
+      for (const game of t.games) {
+        if (!this.knownPlayerIds.has(game.playerAId)) {
+          newIds.push(game.playerAId)
+        }
+        if (!this.knownPlayerIds.has(game.playerBId)) {
+          newIds.push(game.playerBId)
         }
       }
     }
