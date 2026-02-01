@@ -174,6 +174,47 @@ export class LogWatcher {
   }
 }
 
+// ============ Player Name Cache (Persistent) ============
+
+const PLAYER_CACHE_PATH = `${homedir()}/.config/battleship-tui/player-cache.json`
+
+export class PlayerNameCache {
+  private cache = new Map<string, string>()
+
+  async load(): Promise<void> {
+    if (!existsSync(PLAYER_CACHE_PATH)) return
+    try {
+      const content = await readFile(PLAYER_CACHE_PATH, "utf-8")
+      const data = JSON.parse(content) as Record<string, string>
+      this.cache = new Map(Object.entries(data))
+    } catch {
+      // Ignore errors, start with empty cache
+    }
+  }
+
+  async save(): Promise<void> {
+    const dir = dirname(PLAYER_CACHE_PATH)
+    if (!existsSync(dir)) await mkdir(dir, { recursive: true })
+    const data = Object.fromEntries(this.cache)
+    await writeFile(PLAYER_CACHE_PATH, JSON.stringify(data, null, 2))
+  }
+
+  update(players: Player[]): boolean {
+    let changed = false
+    for (const p of players) {
+      if (!this.cache.has(p.playerId)) {
+        this.cache.set(p.playerId, p.displayName)
+        changed = true
+      }
+    }
+    return changed
+  }
+
+  getName(playerId: string): string | undefined {
+    return this.cache.get(playerId)
+  }
+}
+
 // ============ Config ============
 
 export interface ConfigData {
@@ -345,15 +386,25 @@ export class Store {
   private players = new Map<string, Player>()
   private tournaments: Tournament[] = []
   private elo = new EloCalculator()
+  private playerNameCache: PlayerNameCache
 
   // Cached values - invalidated on update
   private _leaderboardCache: LeaderboardEntry[] | null = null
   private _tournamentCache: Tournament[] | null = null
 
-  update(players: Player[], tournaments: Tournament[]): void {
+  constructor(playerNameCache: PlayerNameCache) {
+    this.playerNameCache = playerNameCache
+  }
+
+  async update(players: Player[], tournaments: Tournament[]): Promise<void> {
     // Update players
     this.players.clear()
     for (const p of players) this.players.set(p.playerId, p)
+
+    // Update persistent name cache
+    if (this.playerNameCache.update(players)) {
+      await this.playerNameCache.save()
+    }
 
     // Update tournaments
     this.tournaments = tournaments
@@ -367,7 +418,12 @@ export class Store {
   }
 
   getPlayerName(playerId: string): string {
-    return this.players.get(playerId)?.displayName ?? "[Unknown]"
+    // Try current players first
+    const current = this.players.get(playerId)?.displayName
+    if (current) return current
+
+    // Fall back to persistent cache
+    return this.playerNameCache.getName(playerId) ?? "[Unknown]"
   }
 
   // Cached and sorted by ELO descending

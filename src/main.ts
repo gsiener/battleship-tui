@@ -1,6 +1,6 @@
 import { createCliRenderer, TextRenderable, BoxRenderable, type CliRenderer } from "@opentui/core"
 import { ApiClient } from "./api"
-import { Store, Config, LogWatcher, type LeaderboardEntry, type GameBoard } from "./state"
+import { Store, Config, LogWatcher, PlayerNameCache, type LeaderboardEntry, type GameBoard } from "./state"
 
 // ============ UI Rendering Functions ============
 
@@ -150,7 +150,7 @@ class Poller {
   async fetchOnce(): Promise<boolean> {
     try {
       const data = await this.client.fetchAll()
-      this.store.update(data.players, data.tournaments)
+      await this.store.update(data.players, data.tournaments)
       this.errors = 0
       this.onUpdate()
       return true
@@ -414,7 +414,10 @@ class App {
 // ============ Entry Point ============
 
 async function main() {
-  const store = new Store()
+  const playerNameCache = new PlayerNameCache()
+  await playerNameCache.load()
+
+  const store = new Store(playerNameCache)
   const config = new Config()
   await config.load()
 
