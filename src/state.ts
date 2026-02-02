@@ -422,6 +422,13 @@ export class Store {
     const current = this.players.get(playerId)?.displayName
     if (current) return current
 
+    // Built-in bots (hardcoded)
+    const builtInBots: Record<string, string> = {
+      "bot-random": "Random Bot",
+      "bot-hunt-target": "Hunt Target",
+    }
+    if (builtInBots[playerId]) return builtInBots[playerId]
+
     // Fall back to persistent cache
     return this.playerNameCache.getName(playerId) ?? "[Unknown]"
   }
