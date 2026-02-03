@@ -27,14 +27,14 @@ function renderLeaderboard(
   for (let i = scrollOffset; i < endIdx; i++) {
     const e = entries[i]!
     const rank = String(i + 1).padStart(2)
-    const online = e.isOnline ? "🟢" : "  "
     const fav = config.isFavorite(e.playerId) ? "⭐" : " "
-    const name = e.displayName.slice(0, 11).padEnd(11)
+    const name = e.displayName.slice(0, 10).padEnd(10)
     const rating = String(e.rating).padStart(4)
     const change = formatRatingChange(e.ratingChange)
     const prov = e.isProvisional ? "*" : " "
     const sel = i === selectedIndex ? ">" : " "
-    lines.push(`${sel}${rank}.${online}${fav}${name} ${rating}${prov} ${change}`)
+    const online = e.isOnline ? "●" : " "
+    lines.push(`${sel}${rank}.${e.facehash}${fav}${name} ${rating}${prov}${online}${change}`)
   }
 
   // Scroll indicators

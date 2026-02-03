@@ -1,4 +1,35 @@
 import { existsSync, watch, type FSWatcher } from "fs"
+
+// ============ Facehash (Emoji Avatar Generator) ============
+
+// Deterministic emoji avatar based on player ID hash
+// Inspired by facehash.dev - same input = same face, always
+
+const AVATARS = [
+  // Animals - distinctive and fun
+  "🐶", "🐱", "🐭", "🐹", "🐰", "🦊", "🐻", "🐼", "🐨", "🐯",
+  "🦁", "🐮", "🐷", "🐸", "🐵", "🐔", "🐧", "🐦", "🦆", "🦅",
+  "🦉", "🐺", "🐗", "🐴", "🦄", "🐝", "🦋", "🐌", "🐞", "🐢",
+  "🐍", "🐙", "🦑", "🦐", "🦀", "🐡", "🐠", "🐟", "🐬", "🐳",
+  "🦈", "🐊", "🦓", "🦍", "🐘", "🦛", "🦏", "🐪", "🦒", "🦘",
+  // Objects - nautical/battle themed
+  "⚓", "🔱", "⛵", "🚢", "🎯", "💣", "🔥", "💀", "👑", "🎖️",
+  "🏴", "⚔️", "🛡️", "🗡️", "💎", "🔮", "🎲", "♟️", "🧭", "🌊",
+]
+
+// Simple string hash function
+function hashString(str: string): number {
+  let hash = 5381
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) + hash) ^ str.charCodeAt(i)
+  }
+  return Math.abs(hash)
+}
+
+export function generateFacehash(playerId: string): string {
+  const hash = hashString(playerId)
+  return AVATARS[hash % AVATARS.length]!
+}
 import { mkdir, readFile, writeFile, open } from "fs/promises"
 import { dirname } from "path"
 import { homedir } from "os"
@@ -380,6 +411,7 @@ export interface LeaderboardEntry {
   gameCount: number
   isProvisional: boolean
   isOnline: boolean
+  facehash: string
 }
 
 export class Store {
@@ -438,7 +470,10 @@ export class Store {
     if (this._leaderboardCache) return this._leaderboardCache
 
     const entries: LeaderboardEntry[] = []
-    for (const playerId of this.elo.getAllPlayerIds()) {
+    const playersWithGames = new Set(this.elo.getAllPlayerIds())
+
+    // Add players with games
+    for (const playerId of playersWithGames) {
       const player = this.players.get(playerId)
       entries.push({
         playerId,
@@ -448,7 +483,24 @@ export class Store {
         gameCount: this.elo.getGameCount(playerId),
         isProvisional: this.elo.isProvisional(playerId),
         isOnline: player?.isConnected ?? false,
+        facehash: generateFacehash(playerId),
       })
+    }
+
+    // Add online players without games (at default rating, provisional)
+    for (const player of this.players.values()) {
+      if (player.isConnected && !playersWithGames.has(player.playerId)) {
+        entries.push({
+          playerId: player.playerId,
+          displayName: player.displayName,
+          rating: 1500,
+          ratingChange: 0,
+          gameCount: 0,
+          isProvisional: true,
+          isOnline: true,
+          facehash: generateFacehash(player.playerId),
+        })
+      }
     }
 
     entries.sort((a, b) => b.rating - a.rating)
