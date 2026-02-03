@@ -19,7 +19,7 @@ function renderLeaderboard(
   filterActive: boolean
 ): string {
   const title = filterActive ? "🏆 LEADERBOARD (filtered)" : "🏆 LEADERBOARD"
-  const lines = [title, "─".repeat(28)]
+  const lines = [title, "─".repeat(32)]
 
   const visibleCount = viewportHeight - 2
   const endIdx = Math.min(scrollOffset + visibleCount, entries.length)
@@ -27,14 +27,14 @@ function renderLeaderboard(
   for (let i = scrollOffset; i < endIdx; i++) {
     const e = entries[i]!
     const rank = String(i + 1).padStart(2)
-    const fav = config.isFavorite(e.playerId) ? "⭐" : " "
-    const name = e.displayName.slice(0, 10).padEnd(10)
-    const rating = String(e.rating).padStart(4)
-    const change = formatRatingChange(e.ratingChange)
+    const fav = config.isFavorite(e.playerId) ? "⭐" : "  "  // 2 spaces to match emoji width
+    const name = e.displayName.slice(0, 12).padEnd(12)
+    const rating = String(e.rating).padStart(5)
+    const change = formatRatingChange(e.ratingChange).padStart(5)
     const prov = e.isProvisional ? "*" : " "
     const sel = i === selectedIndex ? ">" : " "
     const online = e.isOnline ? "●" : " "
-    lines.push(`${sel}${rank}.${e.facehash}${fav}${name} ${rating}${prov}${online}${change}`)
+    lines.push(`${sel}${rank}.${e.facehash}${fav}${name}  ${rating}${prov} ${online}${change}`)
   }
 
   // Scroll indicators
@@ -248,8 +248,8 @@ class App {
     })
     this.renderer.root.add(this.headerText)
 
-    // Leaderboard (left 35%)
-    const lbWidth = Math.floor(width * 0.35)
+    // Leaderboard (left 40%)
+    const lbWidth = Math.floor(width * 0.40)
     const contentHeight = height - 3
     this.lbViewportHeight = contentHeight - 4
 
